@@ -91,12 +91,17 @@ class PopupMenu:
         on_quit: Callable[[], None],
         on_open_data_folder: Callable[[], None] | None = None,
         pace_enabled: bool = True,
+        pace_history_for: Callable[[object], list[float]] | None = None,
     ) -> None:
         self._statuses = statuses
         self._on_open_dashboard = on_open_dashboard
         self._on_refresh = on_refresh
         self._on_quit = on_quit
         self._on_open_data_folder = on_open_data_folder
+        # v3 §10 — real pace history feed: maps a LiveStatus → its recent
+        # pace percentages (from the DB via the tray/cli wiring). ``None``
+        # keeps the empty-history stub behaviour.
+        self._pace_history_for = pace_history_for
         self._pace_enabled = pace_enabled
         # Populated by :meth:`build`. Tests assert against this list.
         self.account_rows: list[_AccountCard] = []
@@ -139,11 +144,17 @@ class PopupMenu:
                 key=lambda s: (list(Provider).index(s.provider), s.alias),
             )
             for status in ordered:
+                history = (
+                    self._pace_history_for(status)
+                    if self._pace_history_for is not None
+                    else None
+                )
                 item, card = build_account_card(
                     Gtk, status,
                     pace_enabled=self._pace_enabled,
                     now=now,
                     on_open_dashboard=self._on_open_dashboard,
+                    pace_history=history,
                 )
                 menu.append(item)
                 self.account_rows.append(card)

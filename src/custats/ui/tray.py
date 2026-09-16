@@ -152,6 +152,7 @@ class TrayIcon:
         on_refresh: Callable[[], Any],
         on_quit: Callable[[], Any],
         on_open_data_folder: Callable[[], Any] | None = None,
+        pace_history_for: Callable[[Any], list[float]] | None = None,
         statuses: dict | None = None,
     ) -> None:
         if not _try_gtk():
@@ -168,6 +169,8 @@ class TrayIcon:
         self._on_refresh = on_refresh
         self._on_quit = on_quit
         self._on_open_data_folder = on_open_data_folder
+        # v3 §10 — real pace history feed, forwarded to the popup.
+        self._pace_history_for = pace_history_for
         self._statuses: dict = statuses or {}
         # v3 §10 alert-animation state: severity of the last snapshot, the
         # monotonic deadline of the current attention window, and whether
@@ -253,6 +256,7 @@ class TrayIcon:
             statuses=statuses,
             on_open_dashboard=self._on_open_dashboard,
             on_open_data_folder=self._on_open_data_folder,
+            pace_history_for=self._pace_history_for,
             on_refresh=self._on_refresh,
             on_quit=self._on_quit,
         ).build()

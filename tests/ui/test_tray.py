@@ -738,3 +738,46 @@ def test_tray_attention_blink_window_expires(monkeypatch):
     last_status = tray._indicator.set_status.call_args_list[-1].args[0]
     assert last_status is AppIndicator3.IndicatorStatus.ACTIVE
     assert tray_mod._ALERT_BLINK_SECONDS > 0
+
+
+def test_tray_forwards_pace_history_for(monkeypatch):
+    """v3 §10 — TrayIcon forwards ``pace_history_for`` to the popup so the
+    animated sparkline renders DB-backed history; default stays ``None``."""
+    import custats.ui.popup as popup_mod
+
+    install_gtk_mocks()
+    captured: list = []
+
+    real_init = popup_mod.PopupMenu.__init__
+
+    def _capturing_init(self, **kwargs):
+        real_init(self, **kwargs)
+        captured.append(self)
+
+    monkeypatch.setattr(popup_mod.PopupMenu, "__init__", _capturing_init)
+
+    def history_for(status):
+        return [40.0, 60.0]
+
+    TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        pace_history_for=history_for,
+        statuses={
+            "a1": fake_status(account_id="a1", provider="claude", alias="work"),
+        },
+    )
+    assert captured, "TrayIcon never built a PopupMenu"
+    popup = captured[-1]
+    assert popup._pace_history_for is history_for
+
+    install_gtk_mocks()
+    captured.clear()
+    TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        statuses={},
+    )
+    assert captured[-1]._pace_history_for is None

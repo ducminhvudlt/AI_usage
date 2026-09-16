@@ -636,3 +636,59 @@ def test_welcome_card_click_opens_dashboard(monkeypatch):
     assert handlers, "welcome card never registered an activate handler"
     handlers[-1](None)  # GTK passes the activating widget; mock passes None
     assert fired == ["dashboard"]
+
+
+# ---------------------------------------------------------------------- #
+# v3 §10 — real pace history feed (DB-backed sparkline)
+# ---------------------------------------------------------------------- #
+
+
+def test_pace_history_for_feeds_build_account_card(monkeypatch):
+    """Passing ``pace_history_for`` routes a LiveStatus's real history
+    into ``build_account_card`` — the sparkline renders the DB points."""
+    from custats.ui._components import _sparkline
+
+    _Gtk, _items = _install_gtk(monkeypatch)
+    seen: list = []
+
+    def history_for(status):
+        seen.append(status.alias)
+        return [30.0, 50.0, 70.0]
+
+    popup = PopupMenu(
+        statuses={
+            "a1": fake_status(alias="work", pace_projection_percent=67.0,
+                              pace_label="Risky"),
+        },
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        pace_history_for=history_for,
+    )
+    popup.build()
+    assert seen == ["work"], "history callback never invoked"
+    card = popup.account_rows[0]
+    assert _sparkline([30.0, 50.0, 70.0], anim=card.pace_anim) in card.pace_text
+
+
+def test_pace_history_none_keeps_stub_behaviour(monkeypatch):
+    """Without the callback the sparkline keeps the empty-history stub —
+    existing callers (and their tests) are unaffected."""
+    from custats.ui._components import _SPARKLINE_BLOCKS
+
+    _Gtk, _items = _install_gtk(monkeypatch)
+    popup = PopupMenu(
+        statuses={
+            "a1": fake_status(alias="work", pace_projection_percent=67.0,
+                              pace_label="Risky"),
+        },
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+    )
+    popup.build()
+    card = popup.account_rows[0]
+    # The stub feeds [] → fallback row (one repeated block), not real data.
+    assert any(
+        _SPARKLINE_BLOCKS[i] * 10 in card.pace_text for i in range(2)
+    )

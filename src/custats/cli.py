@@ -220,11 +220,28 @@ def cmd_run(args: Namespace) -> int:
                 file=sys.stderr,
             )
 
+    def _pace_history_for(status) -> list[float]:
+        """v3 §10 — real pace history for the animated sparkline.
+
+        Fires inside ``poller._broadcast`` (poller thread), which owns
+        the SQLite connection — thread-confined access is exactly what
+        the storage layer expects. Best-effort: a lookup failure
+        degrades to the empty-history stub, never breaks the tray.
+        """
+        try:
+            from .ui._components import recent_pace_points
+
+            rows = db.recent_pace_history(status.account_id, n=10)
+            return recent_pace_points(rows)
+        except Exception:  # noqa: BLE001 — sparkline is cosmetic
+            return []
+
     tray: TrayIcon | None = None
     try:
         tray = TrayIcon(
             on_open_dashboard=_open_dashboard,
             on_open_data_folder=_open_data_folder,
+            pace_history_for=_pace_history_for,
             on_refresh=lambda: poller.submit_from_any_thread(
                 _refresh_now_coro(poller)
             ),

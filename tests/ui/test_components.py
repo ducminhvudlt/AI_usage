@@ -15,7 +15,51 @@ from custats.ui._components import (
     _sparkline,
     build_account_card,
     get_tick,
+    recent_pace_points,
 )
+
+
+# ---------------------------------------------------------------------- #
+# recent_pace_points — real DB history → sparkline feed
+# ---------------------------------------------------------------------- #
+
+
+def _usage_row(seven: float | None) -> "Usage":
+    """Minimal Usage stand-in with only the fields the helper reads."""
+    from custats.core.models import Provider, ProviderLimits, Usage
+    from datetime import datetime, timezone
+
+    return Usage(
+        account_id="a1",
+        provider=Provider.CLAUDE,
+        fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        seven_day=(
+            ProviderLimits(seven_day_percent=seven) if seven is not None else None
+        ),
+    )
+
+
+def test_recent_pace_points_extracts_trailing_percentages():
+    rows = [_usage_row(v) for v in (10.0, 20.0, 30.0)]
+    assert recent_pace_points(rows) == [10.0, 20.0, 30.0]
+
+
+def test_recent_pace_points_truncates_to_last_n():
+    rows = [_usage_row(v) for v in range(0, 100, 10)]  # 10 rows
+    assert len(recent_pace_points(rows)) == _SPARKLINE_BUCKETS
+    assert recent_pace_points(rows)[-1] == 90.0
+
+
+def test_recent_pace_points_skips_none_windows():
+    """Rows without a seven-day window (e.g. Cursor) are skipped, not
+    zero-filled — a sparse history renders only measured points."""
+    rows = [_usage_row(10.0), _usage_row(None), _usage_row(30.0)]
+    assert recent_pace_points(rows) == [10.0, 30.0]
+
+
+def test_recent_pace_points_empty_history_returns_empty():
+    assert recent_pace_points([]) == []
+    assert recent_pace_points([_usage_row(None)]) == []
 
 
 # ---------------------------------------------------------------------- #

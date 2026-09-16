@@ -244,6 +244,28 @@ class Database:
         rows = self._conn.execute(query, params).fetchall()
         return [_row_to_usage(row) for row in rows]
 
+    def recent_pace_history(self, account_id: str, n: int = 10) -> list[Usage]:
+        """Return the most recent ``n`` usage snapshots, oldest → newest.
+
+        Feeds the popup pace sparkline (design-tokens-v3 §10): a tail
+        query instead of a full-table scan, so the tray can call it on
+        every menu rebuild. Must be called on the owning thread of the
+        connection (the poller thread in the ``cmd_run`` wiring).
+        """
+        rows = self._conn.execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM usage_history
+                 WHERE account_id = ?
+                 ORDER BY fetched_at DESC, id DESC
+                 LIMIT ?
+            )
+            ORDER BY fetched_at ASC, id ASC
+            """,
+            (account_id, n),
+        ).fetchall()
+        return [_row_to_usage(row) for row in rows]
+
 
 # ---------------------------------------------------------------------- #
 # helpers

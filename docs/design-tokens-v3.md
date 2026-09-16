@@ -202,6 +202,12 @@ since shipped:
 - **Animated sparklines** — the Unicode-only pace sparkline shifts one
   block-step per animation frame (two frames, ~2 fps, driven by
   ``get_tick()``; no Cairo, no timers). The fallback row breathes too.
+  The line renders **real data**: ``cmd_run`` hands the tray a
+  ``pace_history_for`` callback backed by
+  ``Database.recent_pace_history`` + ``recent_pace_points`` (last 10
+  seven-day percentages, oldest → newest; rows without a 7-day window
+  are skipped). Without the callback (tests, standalone popup) the
+  empty-history stub still applies.
   Tests: ``tests/ui/test_components.py`` asserts frame outputs and the
   ``_AccountCard.pace_anim`` attribute.
 - **Per-account notification preferences** — ``AppConfig.notify_accounts``

@@ -206,7 +206,8 @@ a missing venv / autostart entry / service unit.
 - Per-account notification preferences and animated sparklines (two more
   former §10 deferrals) have also shipped: toggle notifications per
   account in the Accounts tab (`Notify: on/off`), and the popup pace
-  sparkline now animates in two Unicode-only frames — no Cairo, no
+  sparkline now animates in two Unicode-only frames over your **real**
+  usage history (last ten 7-day readings from `state.db`) — no Cairo, no
   timers. Only the ClaudeBar pixel mascot remains deferred.
 
 ---

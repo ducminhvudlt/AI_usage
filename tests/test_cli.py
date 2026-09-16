@@ -439,6 +439,76 @@ class TestRun:
         assert captured.get("on_refresh") is not None
         assert captured.get("on_quit") is not None
 
+    def test_run_pace_history_callback_reads_db(
+        self, isolated_xdg: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """v3 §10 — the ``pace_history_for`` callback cmd_run hands to
+        TrayIcon reduces real DB history to sparkline points."""
+        from argparse import Namespace
+
+        from custats import cli as cli_module
+        from custats.core.models import Provider, ProviderLimits, Usage
+        from custats.core.time_utils import now_utc
+        from custats.storage.db import Database
+        from custats.storage.encrypted import load_or_create_key
+
+        add = _run_cli(
+            "add", "--provider", "claude", "--alias", "x",
+            "--session-key", "y", xdg=isolated_xdg,
+        )
+        assert add.returncode == 0, add.stderr
+
+        monkeypatch.setenv("HOME", str(isolated_xdg))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_xdg / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(isolated_xdg / "data"))
+
+        # Seed history for the account cmd_run will poll.
+        key = load_or_create_key(isolated_xdg / "config" / "custats" / "secret.key")
+        db = Database(isolated_xdg / "data" / "custats" / "state.db", key)
+        rows = db.list_accounts(include_inactive=False)
+        acct = rows[0][0]
+        for pct in (10.0, 30.0, 50.0):
+            db.record_usage(
+                acct.id,
+                Usage(
+                    account_id=acct.id,
+                    provider=Provider.CLAUDE,
+                    fetched_at=now_utc(),
+                    seven_day=ProviderLimits(seven_day_percent=pct),
+                ),
+            )
+        db.close()
+
+        captured: dict = {}
+
+        def _capture_tray(**kwargs):
+            captured.update(kwargs)
+            raise KeyboardInterrupt()
+
+        import custats.ui.tray as tray_module
+        from unittest.mock import patch
+
+        # MainWindow needs no patching here: real GTK is absent under
+        # tests/test_cli.py, so its construction hits the TrayUnavailable
+        # fallback (main_window=None) inside cmd_run.
+        with patch.object(tray_module, "TrayIcon", _capture_tray):
+            args = Namespace(config_file=None, db_file=None, key_file=None)
+            try:
+                cli_module.cmd_run(args)
+            except KeyboardInterrupt:
+                pass
+
+        history_for = captured.get("pace_history_for")
+        assert history_for is not None, (
+            f"cmd_run did not pass pace_history_for: {sorted(captured)}"
+        )
+        # The callback runs against the real (reopened) DB.
+        points = history_for(type("S", (), {"account_id": acct.id})())
+        assert points == [10.0, 30.0, 50.0]
+
+        # Degradation path: unknown account id → empty list, not a raise.
+        assert history_for(type("S", (), {"account_id": "nope"})()) == []
+
     def test_run_with_account_does_not_close_db_early(
         self, isolated_xdg: Path
     ) -> None:

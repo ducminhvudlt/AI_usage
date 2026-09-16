@@ -40,6 +40,29 @@ def get_tick() -> int:
     """Monotonic animation tick (two frames per wall-clock second)."""
     return int(time.monotonic() * 2)
 
+
+def recent_pace_points(usage_rows, *, n: int = _SPARKLINE_BUCKETS) -> list[float]:
+    """Reduce persisted ``Usage`` rows to the last ``n`` pace percentages.
+
+    The sparkline's real data feed (v3 §10): callers pass the rows from
+    :meth:`custats.storage.db.Database.usage_history` — oldest → newest —
+    and get back the trailing ``n`` non-``None`` seven-day percentages,
+    oldest → newest, ready for :func:`_sparkline`. The seven-day window
+    is the pace signal (the 5-hour window resets too fast to trend).
+
+    Rows with no seven-day value (e.g. Cursor) are skipped rather than
+    zero-filled so a sparse history renders only what was actually
+    measured.
+    """
+    points: list[float] = []
+    for row in usage_rows:
+        seven = getattr(row, "seven_day", None)
+        pct = getattr(seven, "seven_day_percent", None) if seven is not None else None
+        if pct is None:
+            continue
+        points.append(float(pct))
+    return points[-n:]
+
 # Unicode blocks for the bar (filled / empty). U+2588 and U+2591 survive
 # font fallback (Cantarell / Adwaita Sans / Noto Sans) per design-tokens-v3.md §4.
 _BAR_FILLED = "\u2588"
@@ -357,5 +380,6 @@ __all__ = [
     "_AccountCard",
     "build_account_card",
     "get_tick",
+    "recent_pace_points",
     "_SPARK_ANIMATION_FRAMES",
 ]
