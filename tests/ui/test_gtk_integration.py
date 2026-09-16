@@ -24,6 +24,22 @@ from custats.core.config import AppConfig
 from custats.ui.main_window import MainWindow
 from custats.ui.tray import TrayIcon, TrayUnavailable
 
+
+def _purge_gtk_mocks() -> None:
+    """Drop conftest-installed mock modules so real ``gi`` imports work.
+
+    ``tests/ui/conftest.py`` installs MagicMock ``gi`` / ``gi.repository``
+    modules into ``sys.modules`` at collection time for the mock-based
+    suite. Real GTK needs the actual bindings, so any stale fakes must
+    go before the first genuine ``import gi`` inside the code under test.
+    Re-running the mock suite afterwards re-installs mocks harmlessly
+    (``install_gtk_mocks`` always creates fresh modules).
+    """
+    import sys
+
+    for name in ("gi", "gi.repository", "cairo"):
+        sys.modules.pop(name, None)
+
 _REASON = (
     "set CUSTATS_GTK_TESTS=1 and install gir1.2-gtk-3.0 + "
     "gir1.2-appindicator3-0.1 (no girepository typelibs on this box)"
@@ -81,6 +97,7 @@ def _build_status(
 
 def test_real_gtk_main_window_builds() -> None:
     """MainWindow builds a real four-tab Gtk.Notebook end to end."""
+    _purge_gtk_mocks()
     win = MainWindow(db=None, config=AppConfig(), poller=None)
     try:
         assert win._window is not None
@@ -97,6 +114,7 @@ def test_real_gtk_tray_icon_constructs() -> None:
     """TrayIcon constructs against real AppIndicator3. On headless boxes
     without a StatusNotifierWatcher the indicator may fail at runtime but
     construction itself must succeed (or skip cleanly)."""
+    _purge_gtk_mocks()
     try:
         tray = TrayIcon(
             on_open_dashboard=lambda: None,
@@ -116,6 +134,7 @@ def test_real_gtk_tray_icon_constructs() -> None:
 def test_real_gtk_tray_shape_transition() -> None:
     """A snapshot transition updates ``_last_shape`` with the v3 shape
     glyph — the visual state the tray actually renders."""
+    _purge_gtk_mocks()
     tray = TrayIcon(
         on_open_dashboard=lambda: None,
         on_refresh=lambda: None,
@@ -139,6 +158,7 @@ def test_real_gtk_popup_menu_builds_with_rows() -> None:
     account card + the footer items, using the same code path as the tray."""
     from custats.ui.popup import PopupMenu
 
+    _purge_gtk_mocks()
     opened: list[str] = []
     menu = PopupMenu(
         statuses={
@@ -158,6 +178,7 @@ def test_real_gtk_welcome_card_click_opens_dashboard() -> None:
     """v3 §5 — activating the welcome card fires on_open_dashboard."""
     from custats.ui.popup import PopupMenu
 
+    _purge_gtk_mocks()
     opened: list[str] = []
     popup = PopupMenu(
         statuses={},

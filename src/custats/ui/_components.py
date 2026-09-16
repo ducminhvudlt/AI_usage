@@ -12,6 +12,7 @@ directly without walking the widget tree.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Callable
 
@@ -28,6 +29,17 @@ from ._glyphs import (
 _BAR_CELLS = 14
 _SPARKLINE_BUCKETS = 10
 
+# v3 §10 (formerly deferred) — animated sparklines. Two phase frames at
+# ~2 fps: every build() re-renders the pace line one Unicode block-step
+# further along the bucket ramp, which reads as a gentle "live data"
+# shimmer. Pure text — no Cairo, no timers, exactly as the spec demands.
+_SPARK_ANIMATION_FRAMES = 2
+
+
+def get_tick() -> int:
+    """Monotonic animation tick (two frames per wall-clock second)."""
+    return int(time.monotonic() * 2)
+
 # Unicode blocks for the bar (filled / empty). U+2588 and U+2591 survive
 # font fallback (Cantarell / Adwaita Sans / Noto Sans) per design-tokens-v3.md §4.
 _BAR_FILLED = "\u2588"
@@ -37,18 +49,29 @@ _BAR_EMPTY = "\u2591"
 _SPARKLINE_BLOCKS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
-def _sparkline(points: list[float]) -> str:
+def _sparkline(points: list[float], *, anim: int = 0) -> str:
     """Bucket ``points`` into ``_SPARKLINE_BUCKETS`` Unicode blocks; "" if no points.
 
     v3 §4 widened the bucket count from 8 to 10 for finer detail in the
-    inline sparkline row.
+    inline sparkline row. v3 §10 adds ``anim``: the animation phase
+    (0/1) shifts every bucket one step up the block ramp so consecutive
+    frames shimmer. Values at the top of the range clamp — the shape
+    never lies, it only breathes.
     """
     if not points:
         return ""
+    anim = anim % _SPARK_ANIMATION_FRAMES
+    # The display width (``_SPARKLINE_BUCKETS`` cells, v3 §4) is separate
+    # from the ramp granularity: Unicode block elements only come in 8
+    # distinct steps (▁▂▃▄▅▆▇█), so bucket indices quantise to the ramp
+    # length. Bucketing by the cell count instead would index past the
+    # end of the ramp on any non-empty history (latent crash — the stub
+    # hid it until real history/animation landed).
+    ramp = len(_SPARKLINE_BLOCKS)
     out: list[str] = []
     for v in points:
         clamped = max(0.0, min(100.0, float(v)))
-        idx = min(_SPARKLINE_BUCKETS - 1, int(clamped / 100.0 * _SPARKLINE_BUCKETS))
+        idx = min(ramp - 1, int(clamped / 100.0 * ramp) + anim)
         out.append(_SPARKLINE_BLOCKS[idx])
     return "".join(out)
 
@@ -111,13 +134,16 @@ def _render_bar_line(
     return f"{label}  {bar}  {int(pct):>4}%{reset_text}"
 
 
-def _render_pace_line(pct: float, spark: str, label: str) -> str:
+def _render_pace_line(pct: float, spark: str, label: str, *, anim: int = 0) -> str:
     """Compose the v3 §4 inline pace text.
 
     Layout: ``Pace  {spark:<10}  {pct:>4}% {label}``. Returns ``""`` when
-    the caller doesn't have a sparkline to show.
+    the caller doesn't have a sparkline to show. v3 §10: with no real
+    history the fallback row still animates (``▁`` frame 0, ``▂`` frame
+    1) so the pace line visibly breathes even before a data feed lands.
     """
-    spark_text = spark or (_SPARKLINE_BLOCKS[0] * _SPARKLINE_BUCKETS)
+    anim = anim % _SPARK_ANIMATION_FRAMES
+    spark_text = spark or (_SPARKLINE_BLOCKS[anim] * _SPARKLINE_BUCKETS)
     return f"Pace  {spark_text:<{_SPARKLINE_BUCKETS}}  {int(pct):>4}% {_escape(label)}"
 
 
@@ -128,6 +154,8 @@ def build_account_card(
     pace_enabled: bool,
     now: datetime,
     on_open_dashboard: Callable[[], None],
+    tick: int | None = None,
+    pace_history: list[float] | None = None,
 ) -> tuple:
     """Build a per-account card and return ``(menu_item, _AccountCard)``.
 
@@ -137,8 +165,14 @@ def build_account_card(
     ``Gtk.MenuItem`` so AppIndicator3 still sees a real ``Gtk.Menu`` of
     ``GtkMenuItem``s.
 
+    v3 §10: ``tick`` is the animation phase source (defaults to
+    :func:`get_tick`); ``pace_history`` overrides the history stub. The
+    pace sparkline shifts one Unicode block-step per frame so
+    consecutive builds shimmer without Cairo or timers.
+
     Returned :class:`_AccountCard` holds typed attributes for testing.
     """
+    anim = (tick if tick is not None else get_tick()) % _SPARK_ANIMATION_FRAMES
     provider = status.provider
     accent = PROVIDER_ACCENT_HEX.get(provider, "#888888")
     glyph_2 = PROVIDER_GLYPH_2.get(provider, "??")
@@ -227,8 +261,14 @@ def build_account_card(
             line_7d.set_xalign(0.0)
             card.pack_start(line_7d, False, False, 0)
         if pace_fraction is not None and status.pace_label:
-            spark = _sparkline(_pace_history_stub(status))
-            pace_text = _render_pace_line(pace_fraction * 100, spark, status.pace_label)
+            history = (
+                pace_history if pace_history is not None
+                else _pace_history_stub(status)
+            )
+            spark = _sparkline(history, anim=anim)
+            pace_text = _render_pace_line(
+                pace_fraction * 100, spark, status.pace_label, anim=anim
+            )
             pace_lbl = Gtk.Label()
             pace_lbl.set_markup(f"<tt>{pace_text}</tt>")
             pace_lbl.set_xalign(0.0)
@@ -255,6 +295,7 @@ def build_account_card(
         bar_text_5h=bar_text_5h,
         bar_text_7d=bar_text_7d,
         pace_text=pace_text,
+        pace_anim=anim,
         widget=card,
     )
     return menu_item, wrapper
@@ -273,7 +314,7 @@ class _AccountCard:
         "provider", "alias", "accent_hex", "glyph_2", "fraction_5h",
         "fraction_7d", "pace_fraction", "pace_label", "widget", "status",
         "badge_glyph", "badge_label", "bar_text_5h", "bar_text_7d",
-        "pace_text",
+        "pace_text", "pace_anim",
     )
 
     def __init__(
@@ -291,6 +332,7 @@ class _AccountCard:
         bar_text_5h: str,
         bar_text_7d: str,
         pace_text: str,
+        pace_anim: int = 0,
         widget,
     ) -> None:
         self.provider = provider
@@ -307,7 +349,13 @@ class _AccountCard:
         self.bar_text_5h = bar_text_5h
         self.bar_text_7d = bar_text_7d
         self.pace_text = pace_text
+        self.pace_anim = pace_anim
         self.widget = widget
 
 
-__all__ = ["_AccountCard", "build_account_card"]
+__all__ = [
+    "_AccountCard",
+    "build_account_card",
+    "get_tick",
+    "_SPARK_ANIMATION_FRAMES",
+]

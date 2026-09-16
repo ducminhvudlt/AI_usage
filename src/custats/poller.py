@@ -229,6 +229,10 @@ class Poller:
     ) -> None:
         if not self._notifier.available():
             return
+        # Per-account opt-out (design-tokens-v3 §10): an account with
+        # notifications disabled is silent regardless of severity.
+        if not self._config.is_notify_enabled(account.id):
+            return
         current, percent = status.five_hour_status, status.five_hour_percent
         # AT_LIMIT first — most urgent.
         if current is UsageStatus.AT_LIMIT and previous is not UsageStatus.AT_LIMIT:

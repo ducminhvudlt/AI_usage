@@ -79,6 +79,11 @@ class AppConfig:
     )
     pace_enabled: bool = True
     theme: str = "auto"  # one of "auto", "light", "dark"
+    # Per-account notification opt-out (design-tokens-v3 §10, formerly
+    # deferred). Keys are ``Account.id`` strings; a missing key means the
+    # account notifies (default-on). Only touched by
+    # :meth:`is_notify_enabled` / :meth:`set_notify_enabled`.
+    notify_accounts: dict[str, bool] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     # helpers
@@ -89,6 +94,14 @@ class AppConfig:
 
     def set_provider_visible(self, provider: Provider, visible: bool) -> None:
         self.show_in_menu_bar[provider] = visible
+
+    def is_notify_enabled(self, account_id: str) -> bool:
+        """True when ``account_id`` should fire notifications (default-on)."""
+        return self.notify_accounts.get(account_id, True)
+
+    def set_notify_enabled(self, account_id: str, enabled: bool) -> None:
+        """Record the per-account notification preference."""
+        self.notify_accounts[account_id] = bool(enabled)
 
     # ------------------------------------------------------------------ #
     # (de)serialization
@@ -101,6 +114,11 @@ class AppConfig:
         # their string value so the on-disk format stays human-readable.
         data["show_in_menu_bar"] = {
             p.value: visible for p, visible in self.show_in_menu_bar.items()
+        }
+        # notify_accounts keys are arbitrary account-id strings — coerce
+        # defensively so the on-disk format stays TOML-safe.
+        data["notify_accounts"] = {
+            str(k): bool(v) for k, v in self.notify_accounts.items()
         }
         return data
 
@@ -125,6 +143,14 @@ class AppConfig:
             for provider in Provider:
                 show.setdefault(provider, True)
             kwargs["show_in_menu_bar"] = show
+        # Coerce notify_accounts values to bool (str "false" etc. would
+        # otherwise stay truthy strings).
+        if "notify_accounts" in kwargs and isinstance(
+            kwargs["notify_accounts"], Mapping
+        ):
+            kwargs["notify_accounts"] = {
+                str(k): bool(v) for k, v in kwargs["notify_accounts"].items()
+            }
         return cls(**kwargs)
 
 

@@ -524,3 +524,95 @@ def test_dark_theme_uses_source_of_truth_accents(db, config, poller):
     assert PROVIDER_ACCENT_HEX[Provider.CLAUDE] in accents
     # Light variant is not picked in dark mode.
     assert PROVIDER_ACCENT_HEX_LIGHT[Provider.CLAUDE] not in accents
+
+
+# ---------------------------------------------------------------------- #
+# v3 §10 — per-account notification toggles (Accounts tab)
+# ---------------------------------------------------------------------- #
+
+
+def _seed_account(db) -> "Account":
+    from custats.core.models import Account as AccountModel
+
+    acct = AccountModel(
+        id="acc-notify-1",
+        alias="work",
+        provider=Provider.CLAUDE,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add_account(acct, {"session_key": "x"})
+    return acct
+
+
+def test_account_row_has_notify_toggle(db, config, poller):
+    """v3 §10 — every Accounts-tab row carries a Notify toggle whose label
+    reflects the CURRENT state (default-on for accounts with no pref)."""
+    acct = _seed_account(db)
+    mw = MainWindow(db=db, config=config, poller=poller)
+    btn = mw._notify_buttons.get(acct.id)
+    assert btn is not None, (
+        f"no Notify button for {acct.id}; keys={list(mw._notify_buttons)}"
+    )
+    assert getattr(btn, "_notify_label_text", None) == "Notify: on"
+
+
+def test_notify_toggle_flips_state_and_persists(db, config, poller, monkeypatch):
+    """Clicking the toggle flips the per-account pref, saves the config,
+    and rebuilds the row with the new label."""
+    import custats.core.config as cfg_mod
+
+    captured: list[AppConfig] = []
+    monkeypatch.setattr(
+        cfg_mod, "save_config", lambda c, path=None: captured.append(c)
+    )
+    acct = _seed_account(db)
+    config.set_notify_enabled(acct.id, False)  # start off
+
+    mw = MainWindow(db=db, config=config, poller=poller)
+    btn = mw._notify_buttons[acct.id]
+    assert getattr(btn, "_notify_label_text", None) == "Notify: off"
+
+    handler = _find_clicked_handler(btn)
+    assert handler is not None, "Notify button must register a clicked handler"
+    handler(btn)
+
+    assert config.is_notify_enabled(acct.id) is True
+    assert len(captured) == 1, "toggle must persist the config"
+    # The list was rebuilt; the new button shows the flipped state.
+    new_btn = mw._notify_buttons[acct.id]
+    assert getattr(new_btn, "_notify_label_text", None) == "Notify: on"
+
+
+def test_notify_toggle_is_per_account(db, config, poller):
+    """Disabling one account leaves another account's pref untouched."""
+    from custats.core.models import Account as AccountModel
+
+    acct_a = _seed_account(db)
+    acct_b = AccountModel(
+        id="acc-notify-2", alias="personal", provider=Provider.CODEX,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add_account(acct_b, {"session_key": "y"})
+
+    mw = MainWindow(db=db, config=config, poller=poller)
+    handler_a = _find_clicked_handler(mw._notify_buttons[acct_a.id])
+    handler_a(mw._notify_buttons[acct_a.id])  # flip A off (was on)
+
+    assert config.is_notify_enabled(acct_a.id) is False
+    assert config.is_notify_enabled(acct_b.id) is True
+
+
+def test_settings_save_preserves_notify_accounts(db, config, poller):
+    """Regression: Settings→Save builds a fresh AppConfig, which must not
+    drop the per-account notify prefs set on the Accounts tab."""
+    acct = _seed_account(db)
+    config.set_notify_enabled(acct.id, False)
+
+    mw = MainWindow(db=db, config=config, poller=poller)
+    cfg = mw._cfg_from_form()
+    assert cfg.is_notify_enabled(acct.id) is False, (
+        "_cfg_from_form must carry over notify_accounts"
+    )
+    # And it must be an independent copy, not an aliased dict.
+    cfg.set_notify_enabled(acct.id, True)
+    assert config.is_notify_enabled(acct.id) is False

@@ -196,8 +196,19 @@ Two previously deferred items have since **shipped**:
   ``TrayIcon._attention_on`` plus ``set_status`` call assertions.
 
 Still deferred (unchanged from v2): ClaudeBar pixel mascot (tray
-shape+colour already carries state); animated sparklines (Unicode-only,
-no Cairo); per-account notification preferences.
+shape+colour already carries state). Two more former deferrals have
+since shipped:
+
+- **Animated sparklines** — the Unicode-only pace sparkline shifts one
+  block-step per animation frame (two frames, ~2 fps, driven by
+  ``get_tick()``; no Cairo, no timers). The fallback row breathes too.
+  Tests: ``tests/ui/test_components.py`` asserts frame outputs and the
+  ``_AccountCard.pace_anim`` attribute.
+- **Per-account notification preferences** — ``AppConfig.notify_accounts``
+  (dict keyed by ``Account.id``, default-on) with
+  ``is_notify_enabled`` / ``set_notify_enabled``; the poller gates
+  ``_maybe_notify`` on it, and the Accounts tab carries a
+  ``Notify: on/off`` toggle per row that persists via ``save_config``.
 
 Also fixed under §5: the empty-state welcome card's ``activate`` handler
 now calls ``on_open_dashboard`` (it was previously wired to a no-op,

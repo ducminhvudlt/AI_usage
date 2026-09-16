@@ -331,6 +331,88 @@ class TestAuthError:
         spy.notify_recovery.assert_not_called()
 
 
+class TestPerAccountNotifyPref:
+    """design-tokens-v3 §10 — per-account notification opt-out."""
+
+    async def test_disabled_account_never_notifies(
+        self,
+        account: Account,
+        db: Database,
+        config: AppConfig,
+    ) -> None:
+        spy = MagicMock(spec=Notifier)
+        spy.available.return_value = True
+        config.set_notify_enabled(account.id, False)
+
+        # Cross the threshold AND land in the worst band — both gated.
+        adapter = _FakeAdapter(
+            [
+                _make_usage(account.id, account.provider, five=95.0),
+            ]
+        )
+        poller = _make_poller(
+            account=account, db=db, config=config, notifier=spy, adapter=adapter,
+        )
+        await poller.poll_once()
+        spy.notify_at_limit.assert_not_called()
+        spy.notify_threshold.assert_not_called()
+        spy.notify_recovery.assert_not_called()
+
+    async def test_reenabled_account_resumes_notifying(
+        self,
+        account: Account,
+        db: Database,
+        config: AppConfig,
+    ) -> None:
+        spy = MagicMock(spec=Notifier)
+        spy.available.return_value = True
+        config.set_notify_enabled(account.id, False)
+        config.set_notify_enabled(account.id, True)
+
+        adapter = _FakeAdapter(
+            [
+                _make_usage(account.id, account.provider, five=95.0),
+            ]
+        )
+        poller = _make_poller(
+            account=account, db=db, config=config, notifier=spy, adapter=adapter,
+        )
+        await poller.poll_once()
+        assert (
+            spy.notify_at_limit.called or spy.notify_threshold.called
+        ), "re-enabled account must resume notifying"
+
+
+    async def test_other_accounts_still_notify(
+        self,
+        account: Account,
+        db: Database,
+        config: AppConfig,
+    ) -> None:
+        """Disabling one account is per-account: a different (unset)
+        account keeps its default-on behaviour."""
+        spy = MagicMock(spec=Notifier)
+        spy.available.return_value = True
+        other = Account(
+            id="other-id", alias="other", provider=account.provider,
+            created_at=account.created_at,
+        )
+        config.set_notify_enabled(other.id, False)
+
+        adapter = _FakeAdapter(
+            [
+                _make_usage(account.id, account.provider, five=95.0),
+            ]
+        )
+        poller = _make_poller(
+            account=account, db=db, config=config, notifier=spy, adapter=adapter,
+        )
+        await poller.poll_once()
+        assert (
+            spy.notify_at_limit.called or spy.notify_threshold.called
+        ), "unset account must keep default-on notifications"
+
+
 class TestThresholdNotification:
     async def test_threshold_crossing_fires(
         self,

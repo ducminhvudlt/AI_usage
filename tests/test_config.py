@@ -69,6 +69,42 @@ class TestAppConfig:
         for provider in Provider:
             assert cfg.is_provider_visible(provider) is True
 
+    def test_notify_accounts_default_on_for_unknown_accounts(self) -> None:
+        """§10 — per-account notify prefs default to enabled; an account
+        with no recorded pref still notifies."""
+        cfg = AppConfig()
+        assert cfg.is_notify_enabled("acc-1") is True
+        assert cfg.is_notify_enabled("never-seen") is True
+
+    def test_set_notify_enabled_round_trip(self) -> None:
+        cfg = AppConfig()
+        cfg.set_notify_enabled("acc-1", False)
+        assert cfg.is_notify_enabled("acc-1") is False
+        # Other accounts are unaffected (per-account, not global).
+        assert cfg.is_notify_enabled("acc-2") is True
+        cfg.set_notify_enabled("acc-1", True)
+        assert cfg.is_notify_enabled("acc-1") is True
+
+    def test_notify_accounts_survives_mapping_round_trip(self) -> None:
+        cfg = AppConfig()
+        cfg.set_notify_enabled("acc-1", False)
+        cfg.set_notify_enabled("acc-2", True)
+        rebuilt = AppConfig.from_mapping(cfg.to_mapping())
+        assert rebuilt.is_notify_enabled("acc-1") is False
+        assert rebuilt.is_notify_enabled("acc-2") is True
+        # Unset accounts still default on.
+        assert rebuilt.is_notify_enabled("acc-3") is True
+
+    def test_save_and_load_round_trip_persists_notify_accounts(
+        self, isolated_xdg: Path
+    ) -> None:
+        cfg = AppConfig()
+        cfg.set_notify_enabled("acc-1", False)
+        save_config(cfg)
+        loaded = load_config()
+        assert loaded.is_notify_enabled("acc-1") is False
+        assert loaded.is_notify_enabled("acc-2") is True
+
     def test_provider_visibility_helpers(self) -> None:
         cfg = AppConfig()
         cfg.set_provider_visible(Provider.CLAUDE, False)

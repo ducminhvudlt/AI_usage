@@ -203,6 +203,11 @@ a missing venv / autostart entry / service unit.
   worsening severity now pulses the tray icon via AppIndicator's
   `ATTENTION` status, and the popup has an "Open data folder" item that
   opens `~/.local/share/custats`.
+- Per-account notification preferences and animated sparklines (two more
+  former §10 deferrals) have also shipped: toggle notifications per
+  account in the Accounts tab (`Notify: on/off`), and the popup pace
+  sparkline now animates in two Unicode-only frames — no Cairo, no
+  timers. Only the ClaudeBar pixel mascot remains deferred.
 
 ---
 

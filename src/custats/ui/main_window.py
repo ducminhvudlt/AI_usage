@@ -143,6 +143,9 @@ class MainWindow:
         self._live_children: list = []
         self._accounts_children: list = []
         self._settings_widgets: dict = {}
+        # v3 §10 — per-account notification toggles, keyed by account id
+        # and rebuilt by :meth:`_refresh_accounts_list`.
+        self._notify_buttons: dict = {}
         self._unsubscribe: Callable[[], None] | None = None
         win = Gtk.Window()
         win.set_title(self.WINDOW_TITLE)
@@ -289,6 +292,7 @@ class MainWindow:
         try:
             from gi.repository import Gtk  # type: ignore[import-not-found]
         except (ImportError, ValueError): return
+        self._notify_buttons = {}
         lb = self._accounts_list
         for c in list(self._accounts_children):
             try: lb.remove(c)
@@ -309,11 +313,39 @@ class MainWindow:
         box = hbox(Gtk, spacing=8)
         lbl = Gtk.Label(label=f"{account.alias}  ·  {account.provider.value}")
         lbl.set_xalign(0.0); box.pack_start(lbl, True, True, 0)
+        # v3 §10 — per-account notification opt-out toggle. Label shows
+        # the CURRENT state; clicking flips it (and persists via
+        # :meth:`_toggle_notify`).
+        notify_on = self._config.is_notify_enabled(account.id)
+        notify_label = f"Notify: {'on' if notify_on else 'off'}"
+        notify_btn = Gtk.Button.new_with_label(notify_label)
+        try:
+            setattr(notify_btn, "_notify_label_text", notify_label)
+        except Exception:
+            pass
+        notify_btn.connect("clicked", lambda _b, a=account: self._toggle_notify(a))
+        self._notify_buttons[account.id] = notify_btn
+        box.pack_start(notify_btn, False, False, 0)
         for label, handler in (("Test", self._on_test), ("Remove", self._on_remove)):
             b = Gtk.Button.new_with_label(label)
             b.connect("clicked", lambda _b, a=account, h=handler: h(a.id))
             box.pack_start(b, False, False, 0)
         return box
+
+    def _toggle_notify(self, account) -> None:
+        """v3 §10 — flip the per-account notification preference.
+
+        Persists through :func:`custats.core.config.save_config` (module
+        ref so tests can patch it), then rebuilds the Accounts list so
+        the button label reflects the new state.
+        """
+        try:
+            enabled = not self._config.is_notify_enabled(account.id)
+            self._config.set_notify_enabled(account.id, enabled)
+            _config_mod.save_config(self._config)
+        except Exception:  # noqa: BLE001 — the toggle must never crash the UI
+            pass
+        self._refresh_accounts_list()
     def _on_test(self, account_id: str) -> None:
         if self._poller is None: return
         try:
@@ -417,7 +449,12 @@ class MainWindow:
             pace_enabled=bool(w["pace_enabled"].get_state()),
             theme=str(w["theme"].get_active_text() or "auto"),
             show_in_menu_bar={p: bool(sw.get_state())
-                              for p, sw in w.get("provider_switches", {}).items()})
+                              for p, sw in w.get("provider_switches", {}).items()},
+            # Preserve per-account notify prefs (v3 §10) — the form has no
+            # widget for them (they live on the Accounts tab), and a fresh
+            # AppConfig would otherwise default the dict to empty and
+            # wipe them on Save.
+            notify_accounts=dict(self._config.notify_accounts))
     def _populate_settings_form(self) -> None:
         w = self._settings_widgets
         if not w: return
