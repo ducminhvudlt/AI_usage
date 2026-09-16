@@ -22,10 +22,16 @@ jobs:
       - name: Install GTK + AppIndicator introspection
         run: |
           sudo apt-get update
+          # gir1.2-* pulls in the GTK runtime libs transitively (the
+          # runtime package name differs across runner images:
+          # libgtk-3-0t64 on 24.04, libgtk-3-0/1 elsewhere).
           sudo apt-get install -y \
-            libgtk-3-1 gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 xvfb \
-            libgirepository1.0-dev libcairo2-dev libdbus-1-dev pkg-config \
-            python3-dev
+            gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 xvfb \
+            libcairo2-dev libdbus-1-dev pkg-config
+          # PyGObject builds need girepository 1.x headers; the dev
+          # package was renamed in the 24.04 image.
+          sudo apt-get install -y libgirepository-1.0-dev \
+            || sudo apt-get install -y libgirepository1.0-dev
 
       - name: Install package
         run: |
