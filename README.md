@@ -113,7 +113,7 @@ journalctl --user -u custats.service -f  # follow logs
 |-----------------------|-------------------------------------------------------------|
 | `run`                 | Start the menu-bar app (foreground).                        |
 | `add`                 | Add a new provider account (interactive or `--flag` driven).|
-| `login`               | Browser sign-in via OAuth device-code (Codex + ChatGPT).    |
+| `login`               | Browser sign-in via OAuth device-code (Codex + ChatGPT; Cloudflare-gated — cookie paste is the reliable fallback). |
 | `remove`              | Delete an account by id (`custats list` to find ids).       |
 | `onboard`             | First-run wizard: detect installed CLIs + walk through setup.|
 | `list`                | Print a table of tracked accounts.                          |
@@ -178,6 +178,31 @@ rm -rf ~/.config/custats
 
 Re-running `./install.sh` is always safe — it's idempotent and will recreate
 a missing venv / autostart entry / service unit.
+
+---
+
+## Known limitations
+
+- **No visual GTK verification in CI.** The dev/CI boxes lack
+  `girepository-2.0` typelibs, so the UI test suite runs against
+  `MagicMock` GTK bindings (per `docs/design-tokens-v3.md` §9). On a
+  GTK-capable machine you can run the opt-in real-GTK smoke suite:
+  `CUSTATS_GTK_TESTS=1 pytest tests/ui/test_gtk_integration.py`.
+- **Cloudflare blocks `custats login` device-flow requests.** OpenAI's
+  device-code endpoint (Codex + ChatGPT) sits behind bot protection that
+  rejects the stock `httpx` TLS fingerprint — a "Just a moment…" 403 can
+  happen regardless of headers. **Cookie paste is the reliable path:**
+  `custats add --provider codex --cookie '<full Cookie header>'` hits the
+  auth-only `/backend-api/usage` endpoint, which is not
+  Cloudflare-gated. `custats login` prints this warning before it starts.
+- **Claude / Grok / Cursor have no public OAuth device-code endpoint**, so
+  browser sign-in is impossible for them — cookie / session-key paste is
+  the only supported path (`custats add`, see `docs/setup-guide.md`).
+- Status-change animations and the "Open data folder" popup footer were
+  **deferred** per `docs/design-tokens-v3.md` §10 but have since shipped:
+  worsening severity now pulses the tray icon via AppIndicator's
+  `ATTENTION` status, and the popup has an "Open data folder" item that
+  opens `~/.local/share/custats`.
 
 ---
 

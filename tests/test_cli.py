@@ -381,6 +381,64 @@ class TestRun:
         assert result.returncode == 1
         assert "no accounts" in result.stderr.lower()
 
+    def test_run_wires_open_data_folder_callback(
+        self, isolated_xdg: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """v3 §10 — ``cmd_run`` passes an ``on_open_data_folder`` handler
+        into :class:`TrayIcon` so the popup footer item appears."""
+        from unittest.mock import MagicMock, patch
+
+        add = _run_cli(
+            "add",
+            "--provider",
+            "claude",
+            "--alias",
+            "x",
+            "--session-key",
+            "y",
+            xdg=isolated_xdg,
+        )
+        assert add.returncode == 0, add.stderr
+
+        # Sandbox HOME + XDG for state_dir().
+        monkeypatch.setenv("HOME", str(isolated_xdg))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_xdg / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(isolated_xdg / "data"))
+
+        from custats import cli as cli_module
+
+        # Capture what cmd_run passes to TrayIcon, then bail out of the
+        # GTK main loop before it blocks the test process.
+        from argparse import Namespace
+
+        captured: dict = {}
+
+        def _capture_tray(**kwargs):
+            captured.update(kwargs)
+            raise KeyboardInterrupt()
+
+        # cmd_run imports TrayIcon and MainWindow inside the function
+        # body, so patch at their source modules.
+        import custats.ui.main_window as main_window_module
+        import custats.ui.tray as tray_module
+
+        with patch.object(tray_module, "TrayIcon", _capture_tray), \
+                patch.object(main_window_module, "MainWindow", MagicMock()):
+            args = Namespace(
+                config_file=None, db_file=None, key_file=None
+            )
+            try:
+                cli_module.cmd_run(args)
+            except KeyboardInterrupt:
+                pass
+
+        assert captured.get("on_open_data_folder") is not None, (
+            f"cmd_run did not pass on_open_data_folder: {sorted(captured)}"
+        )
+        assert captured.get("on_open_dashboard") is not None
+        assert captured.get("on_refresh") is not None
+        assert captured.get("on_quit") is not None
+
     def test_run_with_account_does_not_close_db_early(
         self, isolated_xdg: Path
     ) -> None:
@@ -721,6 +779,9 @@ class TestLogin:
         assert "claude" in stderr
         # And it should point at the cookie-paste fallback.
         assert "custats add" in stderr
+        # Bullet 3 (deepwork): the message names the root cause — no
+        # public OAuth device-code endpoint — not just "not yet".
+        assert "device-code endpoint" in stderr
 
     def test_login_cloudflare_403_suggests_cookie_fallback(
         self,
@@ -801,6 +862,61 @@ class TestLogin:
         # Sanity: the Cloudflare diagnosis is mentioned so the user
         # understands WHY cookie paste is the right fix.
         assert "cloudflare" in stderr
+
+    def test_login_prints_preflight_cloudflare_notice(
+        self,
+        isolated_xdg: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Bullet 2 (deepwork): Cloudflare blocking httpx device-flow
+        requests is a documented limitation, not a runtime surprise.
+        ``cmd_login`` must warn up-front — before any network traffic —
+        that OpenAI's device-code endpoint is Cloudflare-gated and name
+        cookie paste as the reliable path."""
+        from argparse import Namespace
+
+        from custats.cli import cmd_login
+        from custats.core.models import Provider
+        from custats.oauth import providers as providers_module
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_xdg / "config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(isolated_xdg / "data"))
+
+        from custats.oauth.device_code import DeviceCodeCancelled
+
+        async def fail_fast(client, *, on_poll=None):  # noqa: D401
+            # Cancel cleanly — this test only asserts on the pre-flight
+            # notice, which prints before any network traffic happens.
+            raise DeviceCodeCancelled("no network traffic expected")
+
+        monkeypatch.setitem(
+            providers_module.SUPPORTED, Provider.CODEX, fail_fast
+        )
+
+        args = Namespace(
+            provider=Provider.CODEX,
+            alias="throwaway",
+            config_file=None,
+            db_file=None,
+            key_file=None,
+        )
+        rc = cmd_login(args)
+        captured = capsys.readouterr()
+
+        assert rc != 0
+        err = captured.err
+        preflight = err.find("Cloudflare-gated")
+        assert preflight != -1, (
+            f"missing pre-flight Cloudflare notice on stderr: {err!r}"
+        )
+        # The notice itself names the reliable fallback command.
+        notice_end = err.find("cookie paste is the reliable path")
+        assert notice_end != -1
+        assert preflight < notice_end
+        assert "custats add --provider codex --cookie" in err
 
     def test_login_copilot_happy_path(
         self,

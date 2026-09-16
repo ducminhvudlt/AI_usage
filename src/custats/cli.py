@@ -196,10 +196,35 @@ def cmd_run(args: Namespace) -> int:
         if main_window is not None:
             main_window.show()
 
+    def _open_data_folder() -> None:
+        """Tray-menu callback (design-tokens-v3 §10): reveal state.db.
+
+        Opens ``state_dir()`` in the desktop's file manager via
+        ``xdg-open``. Best-effort — a missing ``xdg-open`` (minimal
+        desktops, containers) prints a hint instead of crashing the
+        tray loop.
+        """
+        import subprocess
+
+        try:
+            subprocess.Popen(
+                ["xdg-open", str(state_dir())],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except (OSError, FileNotFoundError):
+            print(
+                "custats: could not open the data folder (xdg-open missing?). "
+                f"It lives at {state_dir()}",
+                file=sys.stderr,
+            )
+
     tray: TrayIcon | None = None
     try:
         tray = TrayIcon(
             on_open_dashboard=_open_dashboard,
+            on_open_data_folder=_open_data_folder,
             on_refresh=lambda: poller.submit_from_any_thread(
                 _refresh_now_coro(poller)
             ),
@@ -414,10 +439,16 @@ def cmd_login(args: Namespace) -> int:
     """
     provider = args.provider
     if provider not in BROWSER_FLOW_SUPPORTED:
+        # Claude, Grok, and Cursor publish no public OAuth device-code
+        # endpoint, so there is nothing for ``custats login`` to drive —
+        # cookie / session-key paste is the only supported path. Say so
+        # explicitly instead of the vaguer "not yet supported" alone.
         print(
             f"error: browser sign-in not yet supported for {provider.value!r}; "
-            f"use `custats add --provider {provider.value}` to paste a "
-            f"cookie / session-key instead.",
+            f"{provider.value} has no public OAuth device-code endpoint, so "
+            f"cookie / session-key paste is the only supported path. Use "
+            f"`custats add --provider {provider.value}` instead (see "
+            f"docs/setup-guide.md for the DevTools walkthrough).",
             file=sys.stderr,
         )
         return EXIT_ERROR
@@ -435,6 +466,20 @@ def cmd_login(args: Namespace) -> int:
     # ("ABCD-EFGH") is only known once the device-code request returns,
     # so we print it inside ``_run_login_flow``.
     print(f"custats: opening browser sign-in for {provider.value}")
+    # Pre-flight Cloudflare notice (Codex/ChatGPT only): OpenAI's
+    # device-code endpoint sits behind bot protection that rejects the
+    # stock httpx TLS fingerprint, so this flow can fail no matter what
+    # headers we send. Warn BEFORE the user waits on a code that may
+    # never arrive, and name the reliable fallback up front.
+    if provider in (Provider.CODEX, Provider.CHATGPT):
+        print(
+            "note: OpenAI's device-code endpoint is Cloudflare-gated and may "
+            "reject non-browser clients. If this fails with a bot-management "
+            "403, cookie paste is the reliable path: "
+            f"`custats add --provider {provider.value} --cookie "
+            "'<full Cookie header from chatgpt.com>'`.",
+            file=sys.stderr,
+        )
     # Each provider's verification URL is stable + provider-known; surface
     # it up-front so the user can flip to their browser while we open the
     # connection and ask for the short code. Codex + ChatGPT share the

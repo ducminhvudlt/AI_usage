@@ -32,7 +32,10 @@ summary and exits 0. Then run `custats run` to start the menu bar app.
 ## 1. The 30-second quick start
 
 Pick **one** provider you have a subscription for. The Codex / ChatGPT path is
-the easiest because the browser does the auth — no cookie-pasting required.
+the easiest because the browser does the auth — but note that OpenAI's
+device-code endpoint is Cloudflare-gated and can reject non-browser
+clients (HTTP 403 "Just a moment…"). **If that happens, cookie paste is
+the reliable path** — it bypasses Cloudflare entirely.
 
 ```bash
 # 1. Browser OAuth (Codex + ChatGPT only)
@@ -115,8 +118,9 @@ screen. custats writes `~/.chatgpt/auth.json` and inserts the account row.
 > endpoint, which is gated by Cloudflare's bot-protection. If you see
 > HTTP 403 with a "Just a moment…" page, Cloudflare has blocked the
 > request — your IP or the codex-cli User-Agent version is on their
-> deny-list. Fall back to **cookie paste** (above) which hits the
+> deny-list. **Cookie paste is the reliable path** (above): it hits the
 > auth-only `/backend-api/usage` endpoint and is not Cloudflare-protected.
+> `custats login` prints this warning up-front before it starts.
 
 > **One login covers both products.** OpenAI's `device_code_hint` is set to
 > `["codex", "chatgpt"]`, so a single browser approval grants tokens for both.
@@ -164,7 +168,7 @@ just point custats at the existing file).
 > endpoint, which is gated by Cloudflare's bot-protection. If you see
 > HTTP 403 with a "Just a moment…" page, Cloudflare has blocked the
 > request — your IP or the codex-cli User-Agent version is on their
-> deny-list. Fall back to **cookie paste** (above) which hits the
+> deny-list. **Cookie paste is the reliable path** (above): it hits the
 > auth-only `/backend-api/usage` endpoint and is not Cloudflare-protected.
 
 **Auth.json paste:** if you've already done `codex login`, the token is at

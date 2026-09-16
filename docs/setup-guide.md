@@ -187,8 +187,9 @@ custats login --provider chatgpt --alias mychat
 > endpoint, which is gated by Cloudflare's bot-protection. If you see
 > HTTP 403 with a "Just a moment…" page, Cloudflare has blocked the
 > request — your IP or the codex-cli User-Agent version is on their
-> deny-list. Fall back to **cookie paste** (below) which hits the
+> deny-list. **Cookie paste is the reliable path** (below): it hits the
 > auth-only `/backend-api/usage` endpoint and is not Cloudflare-protected.
+> `custats login` also prints this warning before it starts.
 
 ### 6b. ChatGPT — cookie paste (manual fallback)
 

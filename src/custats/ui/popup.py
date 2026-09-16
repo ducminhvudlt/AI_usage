@@ -67,8 +67,14 @@ class PopupMenu:
     The class holds no GTK state — :meth:`build` is called every time the
     tray is clicked and produces a fresh ``Gtk.Menu`` containing one
     ``Gtk.MenuItem`` per account (each wrapping a ``Gtk.Box`` card built
-    by :func:`custats.ui._components.build_account_card`) plus three
-    footer ``Gtk.MenuItem``s (Open Dashboard / Refresh now / Quit).
+    by :func:`custats.ui._components.build_account_card`) plus footer
+    ``Gtk.MenuItem``s (Open Dashboard / Open data folder / Refresh now /
+    Quit).
+
+    The "Open data folder" item was deferred in design-tokens-v2 §10 and
+    v3 §10; it ships here as an optional item that renders only when the
+    caller passes ``on_open_data_folder`` (:class:`~custats.ui.tray.TrayIcon`
+    always does — it opens ``state_dir()`` via ``xdg-open``).
 
     After :meth:`build` returns, ``self.account_rows`` is a ``list`` of
     :class:`_AccountCard` wrappers and ``self.welcome_card`` a bool so
@@ -83,12 +89,14 @@ class PopupMenu:
         on_open_dashboard: Callable[[], None],
         on_refresh: Callable[[], None],
         on_quit: Callable[[], None],
+        on_open_data_folder: Callable[[], None] | None = None,
         pace_enabled: bool = True,
     ) -> None:
         self._statuses = statuses
         self._on_open_dashboard = on_open_dashboard
         self._on_refresh = on_refresh
         self._on_quit = on_quit
+        self._on_open_data_folder = on_open_data_folder
         self._pace_enabled = pace_enabled
         # Populated by :meth:`build`. Tests assert against this list.
         self.account_rows: list[_AccountCard] = []
@@ -146,19 +154,28 @@ class PopupMenu:
             self.keyboard_hint = True
 
         menu.append(Gtk.SeparatorMenuItem.new())
-        for label, callback in (
+        footer_items = [
             ("Open Dashboard", self._on_open_dashboard),
-            ("Refresh now", self._on_refresh),
-            ("Quit", self._on_quit),
-        ):
+        ]
+        # "Open data folder" — deferred in design-tokens-v2 §10 / v3 §10,
+        # now shipped as an optional footer item. Hidden entirely when the
+        # caller passes no handler (keeps PopupMenu usable standalone).
+        if self._on_open_data_folder is not None:
+            footer_items.append(("Open data folder", self._on_open_data_folder))
+        footer_items.extend(
+            [
+                ("Refresh now", self._on_refresh),
+                ("Quit", self._on_quit),
+            ]
+        )
+        for label, callback in footer_items:
             item = Gtk.MenuItem.new_with_label(label)
             item.connect("activate", lambda _w, cb=callback: cb())
             menu.append(item)
         menu.show_all()
         return menu
 
-    @staticmethod
-    def _build_welcome_card(Gtk):
+    def _build_welcome_card(self, Gtk):
         """v3 §5 — friendly 3-step onboarding card.
 
         Replaces v2 §10's ``No accounts configured`` label with a numbered
@@ -204,14 +221,12 @@ class PopupMenu:
             pass
         # Click the welcome card to open the dashboard (v3 §5 mirrors v2's
         # "Open Dashboard" behaviour — the menu item itself stays clickable).
+        # Bug fix: this previously connected to a ``_noop`` placeholder, so
+        # the card rendered clickable but did nothing when activated.
         menu_item.connect(
-            "activate", lambda _w: PopupMenu._noop()
+            "activate", lambda _w: self._on_open_dashboard()
         )
         return menu_item
-
-    @staticmethod
-    def _noop() -> None:  # pragma: no cover — placeholder for the menu-item click
-        return None
 
     @staticmethod
     def _build_keyboard_hint(Gtk):

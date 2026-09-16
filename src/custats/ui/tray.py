@@ -5,9 +5,20 @@ distinct outline glyph (○/◐/△/■) plus colour. Single-account snapshots u
 the shape system directly; multi-account snapshots fall back to v2's
 provider-letter+colour logic so users can still see *which* account is
 the worst at a glance (see docs/design-tokens-v3.md §1).
+
+v3 §10 un-deferred items this module ships:
+- "Open data folder" — the popup footer item appears when the caller
+  passes ``on_open_data_folder`` (``cli.cmd_run`` opens ``state_dir()``).
+- Status-change alert animation — a worsening status (CAUTION→CRITICAL→
+  AT_LIMIT transitions) flips the indicator to
+  ``AppIndicator3.IndicatorStatus.ATTENTION`` for a few seconds, which
+  attention-capable panels render as a highlight/pulse. Pure severity
+  *improvements* do not alert — recovery is announced by the existing
+  Notifier, not the tray.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from ..core.models import Provider
@@ -74,6 +85,12 @@ _IDLE_GLYPH = _STATUS_SHAPE["UNKNOWN"]
 # Higher = worse; used for picking the dominant account.
 _SEVERITY_ORDER = {"UNKNOWN": 0, "GOOD": 0, "CAUTION": 1, "CRITICAL": 2, "AT_LIMIT": 3}
 
+# v3 §10 — status-change alert window. When the worst status *worsens*,
+# the indicator wears ``IndicatorStatus.ATTENTION`` for this many seconds
+# (panels render ATTENTION as a highlight/pulse), then reverts to
+# ACTIVE. Short enough to not annoy; long enough to notice.
+_ALERT_BLINK_SECONDS = 4.0
+
 
 def _worst_status(statuses) -> str:
     """Worst UsageStatus name across all accounts and both windows, or 'UNKNOWN'."""
@@ -134,6 +151,7 @@ class TrayIcon:
         on_open_dashboard: Callable[[], Any],
         on_refresh: Callable[[], Any],
         on_quit: Callable[[], Any],
+        on_open_data_folder: Callable[[], Any] | None = None,
         statuses: dict | None = None,
     ) -> None:
         if not _try_gtk():
@@ -149,7 +167,14 @@ class TrayIcon:
         self._on_open_dashboard = on_open_dashboard
         self._on_refresh = on_refresh
         self._on_quit = on_quit
+        self._on_open_data_folder = on_open_data_folder
         self._statuses: dict = statuses or {}
+        # v3 §10 alert-animation state: severity of the last snapshot, the
+        # monotonic deadline of the current attention window, and whether
+        # the indicator is currently wearing ATTENTION.
+        self._last_alert_sev: int = -1
+        self._alert_blink_until: float = 0.0
+        self._attention_on: bool = False
         self._indicator = AppIndicator3.Indicator.new(
             self.INDICATOR_ID,
             self.INITIAL_ICON,
@@ -173,6 +198,25 @@ class TrayIcon:
 
         worst = _worst_status(statuses)
         use_shape = _use_shape(statuses)
+
+        # v3 §10 — status-change alert animation. Worsening severity
+        # opens a short attention window during which the indicator wears
+        # ``IndicatorStatus.ATTENTION`` (panels render it highlighted);
+        # it reverts to ACTIVE when the window closes. Equal/improving
+        # severity never alerts — recovery is the Notifier's job, not the
+        # tray's.
+        sev = _SEVERITY_ORDER.get(worst, 0)
+        if sev > self._last_alert_sev and self._last_alert_sev >= 0:
+            # Worsening → open the attention window.
+            self._alert_blink_until = time.monotonic() + _ALERT_BLINK_SECONDS
+            self._set_indicator_attention(True)
+        elif sev < self._last_alert_sev and self._attention_on:
+            # Improvement → recovery is calm; close the window at once.
+            self._alert_blink_until = 0.0
+            self._set_indicator_attention(False)
+        self._last_alert_sev = sev
+        if self._attention_on and not self._alert_active():
+            self._set_indicator_attention(False)
         if statuses:
             worst_provider = _worst_account(statuses).provider
             letter = PROVIDER_GLYPH.get(worst_provider, "?")
@@ -208,10 +252,57 @@ class TrayIcon:
         menu = PopupMenu(
             statuses=statuses,
             on_open_dashboard=self._on_open_dashboard,
+            on_open_data_folder=self._on_open_data_folder,
             on_refresh=self._on_refresh,
             on_quit=self._on_quit,
         ).build()
         self._indicator.set_menu(menu)
+
+    def _alert_active(self) -> bool:
+        """True while the v3 §10 status-change attention window is open."""
+        return time.monotonic() < self._alert_blink_until
+
+    def _set_indicator_attention(self, on: bool) -> None:
+        """Flip the AppIndicator3 status between ACTIVE and ATTENTION.
+
+        Best-effort: panels that don't implement ATTENTION simply ignore
+        it, and any error is swallowed — the attention pulse must never
+        break status rendering.
+        """
+        indicator = getattr(self, "_indicator", None)
+        if indicator is None:
+            return
+        try:
+            from gi.repository import AppIndicator3  # type: ignore[import-not-found]
+
+            status = (
+                AppIndicator3.IndicatorStatus.ATTENTION
+                if on
+                else AppIndicator3.IndicatorStatus.ACTIVE
+            )
+            indicator.set_status(status)
+            self._attention_on = on
+            if on:
+                self._schedule_attention_revert()
+        except Exception:
+            pass
+
+    def _schedule_attention_revert(self) -> None:
+        """Revert ATTENTION → ACTIVE when the blink window closes.
+
+        Uses a GLib timeout when available; without GLib the next
+        ``update()`` poll closes the window via ``_alert_active()``.
+        """
+        try:
+            from gi.repository import GLib  # type: ignore[import-not-found]
+
+            def _revert() -> bool:
+                self._set_indicator_attention(False)
+                return False  # one-shot
+
+            GLib.timeout_add_seconds(int(_ALERT_BLINK_SECONDS), _revert)
+        except Exception:
+            pass
 
     def shutdown(self) -> None:
         """Tear down the indicator. Idempotent and best-effort."""

@@ -557,3 +557,82 @@ def test_keyboard_hint_footer_hidden_with_fewer_than_3_rows(monkeypatch):
     popup.build()
     assert popup.keyboard_hint is False
     assert len(popup.account_rows) == 2
+
+
+# ---------------------------------------------------------------------- #
+# v3 §10 — "Open data folder" footer item (previously deferred)
+# ---------------------------------------------------------------------- #
+
+
+def test_open_data_folder_footer_renders_when_handler_given(monkeypatch):
+    """v3 §10 un-deferred — passing ``on_open_data_folder`` renders an
+    "Open data folder" footer item wired to that exact handler."""
+    _Gtk, items = _install_gtk(monkeypatch)
+    fired: list[str] = []
+    popup = PopupMenu(
+        statuses={
+            "a1": fake_status(account_id="a1", alias="a1"),
+            "a2": fake_status(account_id="a2", alias="a2"),
+        },
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        on_open_data_folder=lambda: fired.append("data"),
+    )
+    popup.build()
+    item = items.get("Open data folder")
+    assert item is not None, (
+        f"'Open data folder' missing from built items: {sorted(items)}"
+    )
+    # The handler was registered via connect("activate", ...).
+    registered = [c.args for c in item.connect.call_args_list]
+    assert ("activate", item) or True  # connect args inspected below
+    handlers = [
+        args[1] for args in registered
+        if args and args[0] == "activate"
+    ]
+    assert handlers, "no activate handler registered on the data-folder item"
+    handlers[-1](None)  # GTK passes the activating widget; mock passes None
+    assert fired == ["data"]
+
+
+def test_open_data_folder_footer_hidden_without_handler(monkeypatch):
+    """Without ``on_open_data_folder`` the item is absent — PopupMenu
+    stays usable standalone and the tray is the only caller that opts in."""
+    _Gtk, items = _install_gtk(monkeypatch)
+    popup = PopupMenu(
+        statuses={},
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+    )
+    popup.build()
+    assert "Open data folder" not in items
+
+
+def test_welcome_card_click_opens_dashboard(monkeypatch):
+    """v3 §5 bug fix — activating the welcome card fires
+    ``on_open_dashboard`` (it was previously wired to a no-op)."""
+    _Gtk, _items = _install_gtk(monkeypatch)
+    fired: list[str] = []
+    popup = PopupMenu(
+        statuses={},
+        on_open_dashboard=lambda: fired.append("dashboard"),
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+    )
+    menu = popup.build()
+    assert popup.welcome_card is True
+    # The welcome card is the first menu child; grab it from the Menu's
+    # recorded append order (conftest records append call args).
+    menu_mock = menu
+    appends = menu_mock.append.call_args_list
+    assert appends, "nothing appended to the menu"
+    welcome_item = appends[0].args[0]
+    handlers = [
+        c.args[1] for c in welcome_item.connect.call_args_list
+        if c.args and c.args[0] == "activate"
+    ]
+    assert handlers, "welcome card never registered an activate handler"
+    handlers[-1](None)  # GTK passes the activating widget; mock passes None
+    assert fired == ["dashboard"]

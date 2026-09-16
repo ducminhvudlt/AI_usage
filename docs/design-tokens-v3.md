@@ -178,11 +178,30 @@ Same as v2 §13. New v3 reminders:
 - Manual child tracking continues (`_live_children`, `account_rows`).
   Never rely on `get_children()`.
 
-## §10. Deferred (unchanged from v2)
+## §10. Deferred — status update
 
-Status-change animations; "Open data folder" footer item; ClaudeBar pixel
-mascot (tray shape+colour already carries state); animated sparklines
-(Unicode-only, no Cairo); per-account notification preferences.
+Two previously deferred items have since **shipped**:
+
+- **"Open data folder" footer item** — popup footer entry that opens
+  ``state_dir()`` (``~/.local/share/custats``) via ``xdg-open``. Rendered
+  only when the caller passes ``on_open_data_folder`` to
+  :class:`~custats.ui.popup.PopupMenu` /
+  :class:`~custats.ui.tray.TrayIcon`; the tray always does.
+- **Status-change alert animation** — a worsening severity transition
+  (e.g. CAUTION → CRITICAL) flips the indicator to
+  ``AppIndicator3.IndicatorStatus.ATTENTION`` for
+  ``_ALERT_BLINK_SECONDS`` (4 s), which attention-capable panels render
+  as a highlight/pulse, then reverts to ``ACTIVE``. Improvements never
+  alert — recovery is the Notifier's job. Test contract:
+  ``TrayIcon._attention_on`` plus ``set_status`` call assertions.
+
+Still deferred (unchanged from v2): ClaudeBar pixel mascot (tray
+shape+colour already carries state); animated sparklines (Unicode-only,
+no Cairo); per-account notification preferences.
+
+Also fixed under §5: the empty-state welcome card's ``activate`` handler
+now calls ``on_open_dashboard`` (it was previously wired to a no-op,
+rendering clickable-but-dead).
 
 ## Handoff — items the @fixer interprets
 

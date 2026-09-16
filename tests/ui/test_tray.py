@@ -599,3 +599,142 @@ def test_tray_multi_account_falls_back_to_provider_letter(monkeypatch):
     assert "C" in last_key
     assert "#FF7A6B" in last_key
     assert tray._last_shape is None
+
+
+# ---------------------------------------------------------------------- #
+# v3 §10 — "Open data folder" wiring + status-change alert animation
+# ---------------------------------------------------------------------- #
+
+
+def test_tray_wires_open_data_folder_into_popup(monkeypatch):
+    """v3 §10 un-deferred — TrayIcon forwards ``on_open_data_folder`` to
+    PopupMenu so the footer item appears."""
+    import custats.ui.popup as popup_mod
+
+    install_gtk_mocks()
+    captured: list = []
+
+    real_init = popup_mod.PopupMenu.__init__
+
+    def _capturing_init(self, **kwargs):
+        real_init(self, **kwargs)
+        captured.append(self)
+
+    monkeypatch.setattr(popup_mod.PopupMenu, "__init__", _capturing_init)
+
+    fired: list[str] = []
+    TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        on_open_data_folder=lambda: fired.append("data"),
+        statuses={},
+    )
+    assert captured, "TrayIcon never built a PopupMenu"
+    assert captured[-1]._on_open_data_folder is not None
+    captured[-1]._on_open_data_folder()
+    assert fired == ["data"]
+
+
+def test_tray_no_data_folder_handler_passed_when_unspecified(monkeypatch):
+    """Without ``on_open_data_folder`` the tray forwards ``None`` and the
+    popup hides the footer item (backward-compatible default)."""
+    install_gtk_mocks()
+    tray = TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        statuses={},
+    )
+    assert tray._on_open_data_folder is None
+
+
+def test_tray_attention_flips_on_worsening_status(monkeypatch):
+    """v3 §10 alert animation — a severity increase (GOOD → CRITICAL)
+    flips the indicator to ``IndicatorStatus.ATTENTION``; an equal or
+    improving snapshot never does."""
+    install_gtk_mocks()
+    # Import AFTER install_gtk_mocks(): each install replaces the
+    # gi.repository mock, and mock identity is what we assert against.
+    from gi.repository import AppIndicator3  # mocked by conftest
+    tray = TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        statuses={"a1": fake_status(provider="claude", five_hour_status="GOOD")},
+    )
+    indicator = tray._indicator
+    assert tray._attention_on is False
+    assert all(
+        c.args[0] is not AppIndicator3.IndicatorStatus.ATTENTION
+        for c in indicator.set_status.call_args_list
+    ), "initial prime should not alert (severity starts at its baseline)"
+
+    # Worsen: GOOD → CRITICAL must alert.
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="CRITICAL")}
+    )
+    statuses = [c.args[0] for c in indicator.set_status.call_args_list]
+    assert AppIndicator3.IndicatorStatus.ATTENTION in statuses
+
+    # Same severity again — no additional alert.
+    indicator.set_status.reset_mock()
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="CRITICAL")}
+    )
+    assert not indicator.set_status.call_args_list
+
+
+def test_tray_attention_reverts_on_improvement(monkeypatch):
+    """Recovery (CRITICAL → GOOD) never alerts, and closes an open
+    attention window (reverts to ACTIVE)."""
+    install_gtk_mocks()
+    from gi.repository import AppIndicator3  # mocked by conftest
+    tray = TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        statuses={"a1": fake_status(provider="claude", five_hour_status="GOOD")},
+    )
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="AT_LIMIT")}
+    )
+    assert tray._attention_on is True
+
+    # Improve: AT_LIMIT → GOOD — no new alert, ATTENTION reverts.
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="GOOD")}
+    )
+    indicator = tray._indicator
+    last_status = indicator.set_status.call_args_list[-1].args[0]
+    assert last_status is AppIndicator3.IndicatorStatus.ACTIVE
+    assert tray._attention_on is False
+
+
+def test_tray_attention_blink_window_expires(monkeypatch):
+    """The attention window is time-bounded: forcing the monotonic
+    deadline into the past makes the next update revert to ACTIVE even
+    without a severity change."""
+    import custats.ui.tray as tray_mod
+
+    install_gtk_mocks()
+    from gi.repository import AppIndicator3  # mocked by conftest
+    tray = TrayIcon(
+        on_open_dashboard=lambda: None,
+        on_refresh=lambda: None,
+        on_quit=lambda: None,
+        statuses={"a1": fake_status(provider="claude", five_hour_status="GOOD")},
+    )
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="CAUTION")}
+    )
+    assert tray._attention_on is True
+
+    # Simulate the blink window expiring.
+    tray._alert_blink_until = 0.0
+    tray.update(
+        {"a1": fake_status(provider="claude", five_hour_status="CAUTION")}
+    )
+    last_status = tray._indicator.set_status.call_args_list[-1].args[0]
+    assert last_status is AppIndicator3.IndicatorStatus.ACTIVE
+    assert tray_mod._ALERT_BLINK_SECONDS > 0
