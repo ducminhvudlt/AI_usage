@@ -325,6 +325,12 @@ class TestOnboard:
         env["XDG_DATA_HOME"] = str(isolated_xdg / "data")
         env["PYTHONPATH"] = str(SRC) + os.pathsep + env.get("PYTHONPATH", "")
         env["NO_COLOR"] = "1"
+        # On hosts with GTK installed but no display (CI), force the
+        # child into the headless poller path: a bogus typelib path makes
+        # ``gi.require_version("Gtk", "3.0")`` raise, so cmd_run takes
+        # the deterministic TrayUnavailable branch instead of touching
+        # display-less native Gdk (which aborts the process).
+        env["GI_TYPELIB_PATH"] = "/nonexistent"
 
         result = subprocess.run(
             [sys.executable, "-m", "custats", "onboard"],
@@ -539,6 +545,12 @@ class TestRun:
         env["XDG_DATA_HOME"] = str(isolated_xdg / "data")
         env["PYTHONPATH"] = str(SRC) + os.pathsep + env.get("PYTHONPATH", "")
         env["NO_COLOR"] = "1"
+        # On hosts with GTK installed but no display (CI), force the
+        # child into the headless poller path: a bogus typelib path makes
+        # ``gi.require_version("Gtk", "3.0")`` raise, so cmd_run takes
+        # the deterministic TrayUnavailable branch instead of touching
+        # display-less native Gdk (which aborts the process).
+        env["GI_TYPELIB_PATH"] = "/nonexistent"
 
         proc = subprocess.Popen(
             [sys.executable, "-m", "custats", "run"],

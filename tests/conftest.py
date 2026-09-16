@@ -22,19 +22,30 @@ if str(SRC) not in sys.path:
 
 
 def pytest_configure(config):
-    """Keep the mock suite free of native DBus/Glib calls.
+    """Keep the mock suite free of native GTK/DBus calls.
 
-    On hosts where ``dbus-python`` is installed (e.g. CI), a real
-    ``Notifier(enabled=True)`` would call
-    ``DBusGMainLoop(set_as_default=True)`` — while ``gi`` is mocked by
-    the UI suite — corrupting glib state and SIGTRAP-ing the pytest
-    process at exit (exit code 133). Forcing the module-level flag off
-    makes every Notifier a no-op here; the notifier-specific tests
-    re-enable/monkeypatch the flag themselves to cover both branches.
+    Two guards, both needed on hosts where the real bindings ARE
+    installed (e.g. CI runners):
+
+    1. Install the mock ``gi``/``cairo`` modules suite-wide. Otherwise
+       ``cmd_run``-level tests really construct GTK objects and make
+       native Gdk calls without a display, which aborts the process
+       (SIGTRAP, exit 133). The opt-in real-GTK suite purges these
+       mocks itself before importing real bindings.
+    2. Force the notifier off. A real ``DBusGMainLoop(set_as_default=True)``
+       inside the pytest process corrupts glib state while ``gi`` is
+       mocked. The notifier tests re-enable/monkeypatch the flag
+       themselves to cover both branches.
     """
     try:
         from custats import notifier as _notifier_mod
 
         _notifier_mod._DBUS_AVAILABLE = False
     except Exception:  # pragma: no cover — notifier must exist
+        pass
+    try:
+        from tests.ui.conftest import install_gtk_mocks
+
+        install_gtk_mocks()
+    except Exception:  # pragma: no cover — mocks must exist
         pass
