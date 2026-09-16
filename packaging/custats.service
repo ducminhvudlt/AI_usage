@@ -1,0 +1,13 @@
+[Unit]
+Description=custats — Linux menu bar tracker for Claude / Codex / Grok / Cursor usage
+Documentation=https://custats.info/
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/custats run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

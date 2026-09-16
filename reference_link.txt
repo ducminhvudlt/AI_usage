@@ -1,0 +1,6 @@
+https://github.com/steipete/CodexBar
+https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor
+https://github.com/getagentseal/codeburn
+https://github.com/Javis603/token-monitor
+https://github.com/xiufengsun/TokenTracker
+https://github.com/tddworks/ClaudeBar

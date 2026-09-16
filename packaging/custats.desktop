@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=custats
+GenericName=Usage Limit Tracker
+Comment=Track Claude, Codex, Grok, and Cursor usage limits from the menu bar
+Exec=%h/.local/bin/custats run
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;Monitor;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
