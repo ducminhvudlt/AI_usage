@@ -17,6 +17,27 @@ except ImportError:  # exercised via test monkeypatch
     DBusGMainLoop = None  # type: ignore[assignment]
     _DBUS_AVAILABLE = False
 
+# ``DBusGMainLoop(set_as_default=True)`` must run at most once per
+# process — calling it again trips a native glib assertion (SIGTRAP,
+# exit 133) on boxes where dbus-python is installed. Multiple
+# ``Notifier(enabled=True)`` constructions (e.g. one per ``cmd_run``
+# test) previously re-ran it every time.
+_MAINLOOP_INITIALIZED = False
+
+
+def _init_mainloop_once() -> bool:
+    """Initialize the DBus-Glib main loop once; ``False`` on failure."""
+    global _MAINLOOP_INITIALIZED
+    if _MAINLOOP_INITIALIZED:
+        return True
+    try:
+        assert DBusGMainLoop is not None
+        DBusGMainLoop(set_as_default=True)
+        _MAINLOOP_INITIALIZED = True
+        return True
+    except Exception:
+        return False
+
 
 class Notifier:
     """Sends desktop notifications via freedesktop.org Notifications spec.
@@ -31,16 +52,17 @@ class Notifier:
         self._notify = None
         if self._enabled:
             try:
-                assert DBusGMainLoop is not None
-                DBusGMainLoop(set_as_default=True)
-                bus = dbus.SessionBus()  # type: ignore[union-attr]
-                proxy = bus.get_object(  # type: ignore[union-attr]
-                    "org.freedesktop.Notifications",
-                    "/org/freedesktop/Notifications",
-                )
-                self._notify = proxy.get_dbus_method(
-                    "Notify", "org.freedesktop.Notifications"
-                )
+                if not _init_mainloop_once():
+                    self._enabled = False
+                else:
+                    bus = dbus.SessionBus()  # type: ignore[union-attr]
+                    proxy = bus.get_object(  # type: ignore[union-attr]
+                        "org.freedesktop.Notifications",
+                        "/org/freedesktop/Notifications",
+                    )
+                    self._notify = proxy.get_dbus_method(
+                        "Notify", "org.freedesktop.Notifications"
+                    )
             except Exception:
                 self._enabled = False
 
